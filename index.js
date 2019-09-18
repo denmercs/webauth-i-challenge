@@ -2,7 +2,10 @@ const express = require("express");
 const session = require("express-session");
 const helmet = require("helmet");
 const cors = require("cors");
+require("dotenv").config();
+
 const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
 
 const connectSessionKnex = require("connect-session-knex");
 
@@ -49,8 +52,12 @@ server.post("/api/register", (req, res) => {
   // console.log("this is the bcrypt", user.password);
   Users.add(user)
     .then(saved => {
-      req.session.user = user;
-      res.status(201).json(saved);
+      // req.session.user = user;
+      const token = generateToken(saved);
+      res.status(201).json({
+        user: saved,
+        token
+      });
     })
     .catch(error => {
       res.status(500).json(error);
@@ -66,10 +73,13 @@ server.post("/api/login", (req, res) => {
       // console.log("db password", user.password);
       // console.log("login password", password);
       if (user && bcrypt.compareSync(password, user.password)) {
-        req.session.user = user;
-        res
-          .status(200)
-          .json({ message: `Welcome ${user.username}!, have a cookie!` });
+        // req.session.user = user;
+        const token = generateToken(user);
+
+        res.status(200).json({
+          message: `Welcome ${user.username}!, have a cookie!`,
+          token
+        });
       } else {
         res.status(401).json({ message: "Invalid Credentials" });
       }
@@ -102,7 +112,6 @@ server.get("/logout", (req, res) => {
 function restricted(req, res, next) {
   // the password should not belong in the headers
   // const { username, password } = req.headers;
-
   // if (username && password) {
   //   Users.findBy({ username })
   //     .first()
@@ -121,12 +130,50 @@ function restricted(req, res, next) {
   //     message: "please provide username and password"
   //   });
   // }
+  // if (req.session && req.session.user) {
+  //   next();
+  // } else {
+  //   res.status(401).json({ message: "invalid Credentials" });
+  // }
 
-  if (req.session && req.session.user) {
-    next();
+  const token = req.headers.authorization;
+  // see if there is a token
+  // check if its valid => rehash the header + payload + secret and see if very signature
+  // user id or username
+  if (token) {
+    jwt.verify(token, process.env.JWT_SECRET, (err, decodedToken) => {
+      if (err) {
+        res.status(401).json({
+          message: "not verified"
+        });
+      } else {
+        // token is valid
+        req.decodedToken = decodedToken;
+        next();
+      }
+    });
   } else {
-    res.status(401).json({ message: "invalid Credentials" });
+    res.status(400).json({
+      message: "no token provided"
+    });
   }
+}
+
+function generateToken(user) {
+  // header body and verify signature
+  // payload -> username, id, roles, expiration date
+  // v signature -> a secret
+  const payload = {
+    username: user.username
+  };
+
+  const secret = "keept it secret, keep it safe!";
+
+  const options = {
+    expiresIn: "1d"
+  };
+
+  return jwt.sign(payload, process.env.JWT_SECRET, options);
 }
 
 const port = 4000;
